@@ -1,209 +1,126 @@
 ---
 base_model: Qwen/Qwen2.5-1.5B-Instruct
 library_name: peft
+license: apache-2.0
 pipeline_tag: text-generation
 tags:
-- base_model:adapter:Qwen/Qwen2.5-1.5B-Instruct
-- lora
-- sft
-- transformers
-- trl
+  - lora
+  - qlora
+  - peft
+  - qwen2.5
+  - title-generation
+  - arxiv
 ---
 
-# Model Card for Model ID
+# Qwen2.5-1.5B-Instruct LoRA: arXiv Abstract → Title
 
-<!-- Provide a quick summary of what the model is/does. -->
+A LoRA adapter for `Qwen/Qwen2.5-1.5B-Instruct` that writes a paper title from an arXiv abstract. It was trained with QLoRA (4-bit NF4 base model) on 4,750 abstract-title pairs from `CShorten/ML-ArXiv-Papers`.
 
+This folder holds only the adapter weights and tokenizer files. The base model is downloaded separately from Hugging Face.
 
+## Intended use
 
-## Model Details
+Generating a short, paper-style title for a machine learning abstract. It is a small experimental model, so review outputs before using them anywhere important.
 
-### Model Description
+## How to use
 
-<!-- Provide a longer summary of what this model is. -->
+```python
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
 
+base_id = "Qwen/Qwen2.5-1.5B-Instruct"
+adapter_dir = "path/to/qwen-arxiv-title-adapter"
 
+tokenizer = AutoTokenizer.from_pretrained(adapter_dir)
+base = AutoModelForCausalLM.from_pretrained(
+    base_id,
+    torch_dtype=torch.float16,
+    device_map="auto",
+)
+model = PeftModel.from_pretrained(base, adapter_dir)
+model.eval()
 
-- **Developed by:** [More Information Needed]
-- **Funded by [optional]:** [More Information Needed]
-- **Shared by [optional]:** [More Information Needed]
-- **Model type:** [More Information Needed]
-- **Language(s) (NLP):** [More Information Needed]
-- **License:** [More Information Needed]
-- **Finetuned from model [optional]:** [More Information Needed]
+abstract = "Paste an abstract here."
 
-### Model Sources [optional]
+prompt = (
+    f"<|im_start|>user\nWrite a title for this abstract:\n{abstract}<|im_end|>\n"
+    f"<|im_start|>assistant\n"
+)
+inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
-<!-- Provide the basic links for the model. -->
+with torch.no_grad():
+    out = model.generate(
+        **inputs,
+        max_new_tokens=40,
+        do_sample=False,
+        pad_token_id=tokenizer.pad_token_id,
+    )
 
-- **Repository:** [More Information Needed]
-- **Paper [optional]:** [More Information Needed]
-- **Demo [optional]:** [More Information Needed]
+print(tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip())
+```
 
-## Uses
+The prompt must follow this exact format, because the adapter was trained on it:
 
-<!-- Address questions around how the model is intended to be used, including the foreseeable users of the model and those affected by the model. -->
+```
+<|im_start|>user
+Write a title for this abstract:
+{abstract}<|im_end|>
+<|im_start|>assistant
+```
 
-### Direct Use
+## Training details
 
-<!-- This section is for the model use without fine-tuning or plugging into a larger ecosystem/app. -->
+**Data**
+- Source: `CShorten/ML-ArXiv-Papers`, 5,000 random samples (`seed=42`)
+- Split: 4,750 train and 250 validation (`seed=42`)
+- Whitespace and line breaks cleaned in abstracts and titles
 
-[More Information Needed]
+**Quantization and LoRA**
 
-### Downstream Use [optional]
+| Setting | Value |
+|---|---|
+| Quantization | 4-bit NF4, double quantization, float16 compute |
+| LoRA rank / alpha / dropout | 16 / 32 / 0.05 |
+| Target modules | q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj |
+| Trainable parameters | 18,464,768 (1.18% of 1,562,179,072) |
 
-<!-- This section is for the model use when fine-tuned for a task, or when plugged into a larger ecosystem/app -->
+**Hyperparameters**
 
-[More Information Needed]
+| Setting | Value |
+|---|---|
+| Epochs | 2 (594 steps) |
+| Effective batch size | 16 (4 per device × 4 accumulation) |
+| Learning rate | 2e-4, cosine schedule, 20 warmup steps |
+| Weight decay | 0.01 |
+| Optimizer | paged_adamw_8bit |
+| Precision | fp16, gradient checkpointing |
+| Max sequence length | 512 |
+| Hardware | 1× Tesla T4 (Kaggle), about 57 minutes |
 
-### Out-of-Scope Use
-
-<!-- This section addresses misuse, malicious use, and uses that the model will not work well for. -->
-
-[More Information Needed]
-
-## Bias, Risks, and Limitations
-
-<!-- This section is meant to convey both technical and sociotechnical limitations. -->
-
-[More Information Needed]
-
-### Recommendations
-
-<!-- This section is meant to convey recommendations with respect to the bias, risk, and technical limitations. -->
-
-Users (both direct and downstream) should be made aware of the risks, biases and limitations of the model. More information needed for further recommendations.
-
-## How to Get Started with the Model
-
-Use the code below to get started with the model.
-
-[More Information Needed]
-
-## Training Details
-
-### Training Data
-
-<!-- This should link to a Dataset Card, perhaps with a short stub of information on what the training data is all about as well as documentation related to data pre-processing or additional filtering. -->
-
-[More Information Needed]
-
-### Training Procedure
-
-<!-- This relates heavily to the Technical Specifications. Content here should link to that section when it is relevant to the training procedure. -->
-
-#### Preprocessing [optional]
-
-[More Information Needed]
-
-
-#### Training Hyperparameters
-
-- **Training regime:** [More Information Needed] <!--fp32, fp16 mixed precision, bf16 mixed precision, bf16 non-mixed precision, fp16 non-mixed precision, fp8 mixed precision -->
-
-#### Speeds, Sizes, Times [optional]
-
-<!-- This section provides information about throughput, start/end time, checkpoint size if relevant, etc. -->
-
-[More Information Needed]
+Final training loss was 2.205 and final validation loss was 2.328.
 
 ## Evaluation
 
-<!-- This section describes the evaluation protocols and provides the results. -->
+250 held-out validation samples, greedy decoding, `max_new_tokens=40`:
 
-### Testing Data, Factors & Metrics
+| Metric | Base model | This adapter |
+|---|---|---|
+| ROUGE-1 | 0.405 | 0.448 |
+| ROUGE-2 | 0.212 | 0.249 |
+| ROUGE-L | 0.348 | 0.399 |
 
-#### Testing Data
+## Limitations
 
-<!-- This should link to a Dataset Card if possible. -->
+- Trained on only 5,000 machine learning abstracts, so it may do worse on other fields.
+- Evaluated on 250 samples from the same dataset, in a single run. The gain over the base model is modest.
+- Generated titles can sound right but miss the real topic.
+- The loss was computed over the full formatted text, not only the title tokens.
 
-[More Information Needed]
+## Framework versions
 
-#### Factors
+Trained on Kaggle in November 2026 with the latest releases of `transformers`, `peft`, `trl` and `bitsandbytes` available at that time, on PyTorch 2.11.0 (CUDA 13.0).
 
-<!-- These are the things the evaluation is disaggregating by, e.g., subpopulations or domains. -->
+## Author
 
-[More Information Needed]
-
-#### Metrics
-
-<!-- These are the evaluation metrics being used, ideally with a description of why. -->
-
-[More Information Needed]
-
-### Results
-
-[More Information Needed]
-
-#### Summary
-
-
-
-## Model Examination [optional]
-
-<!-- Relevant interpretability work for the model goes here -->
-
-[More Information Needed]
-
-## Environmental Impact
-
-<!-- Total emissions (in grams of CO2eq) and additional considerations, such as electricity usage, go here. Edit the suggested text below accordingly -->
-
-Carbon emissions can be estimated using the [Machine Learning Impact calculator](https://mlco2.github.io/impact#compute) presented in [Lacoste et al. (2019)](https://arxiv.org/abs/1910.09700).
-
-- **Hardware Type:** [More Information Needed]
-- **Hours used:** [More Information Needed]
-- **Cloud Provider:** [More Information Needed]
-- **Compute Region:** [More Information Needed]
-- **Carbon Emitted:** [More Information Needed]
-
-## Technical Specifications [optional]
-
-### Model Architecture and Objective
-
-[More Information Needed]
-
-### Compute Infrastructure
-
-[More Information Needed]
-
-#### Hardware
-
-[More Information Needed]
-
-#### Software
-
-[More Information Needed]
-
-## Citation [optional]
-
-<!-- If there is a paper or blog post introducing the model, the APA and Bibtex information for that should go in this section. -->
-
-**BibTeX:**
-
-[More Information Needed]
-
-**APA:**
-
-[More Information Needed]
-
-## Glossary [optional]
-
-<!-- If relevant, include terms and calculations in this section that can help readers understand the model or model card. -->
-
-[More Information Needed]
-
-## More Information [optional]
-
-[More Information Needed]
-
-## Model Card Authors [optional]
-
-[More Information Needed]
-
-## Model Card Contact
-
-[More Information Needed]
-### Framework versions
-
-- PEFT 0.21.2
+Md Shahid Afridi ([@ms-afridi](https://github.com/ms-afridi))
