@@ -133,7 +133,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
 base_id = "Qwen/Qwen2.5-1.5B-Instruct"
-adapter_dir = "**Model on Hugging Face:** [ms-afridi/qwen2.5-1.5b-arxiv-title-lora](https://huggingface.co/ms-afridi/qwen2.5-1.5b-arxiv-title-lora)"
+adapter_dir = "ms-afridi/qwen2.5-1.5b-arxiv-title-lora"
 
 tokenizer = AutoTokenizer.from_pretrained(adapter_dir)
 base = AutoModelForCausalLM.from_pretrained(
